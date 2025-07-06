@@ -115,95 +115,63 @@ func printTree(path string, opts *Options, prefix string, isRoot bool) error {
 		return err
 	}
 
-	name := info.Name()
-	if isRoot {
-		name = path
-	}
-
-	var linkTarget string
-	isSymlink := info.Mode()&os.ModeSymlink != 0
-
-	if isSymlink && !opts.noSymlink {
-		if opts.derefLinks {
-			targetPath, err := filepath.EvalSymlinks(path)
-			if err == nil {
-				info, err = os.Stat(targetPath)
-				if err == nil {
-					path = targetPath
-					name = filepath.Base(targetPath)
-					isSymlink = false
-				}
-			}
-		} else {
-			target, err := os.Readlink(path)
-			if err == nil {
-				linkTarget = target
-			}
-		}
-	}
-
-	printNode(name, info, opts, prefix, isRoot, true, linkTarget, isSymlink)
-
-	if !info.IsDir() {
-		return nil
-	}
-
 	entries, err := readDir(path, opts.showHidden, opts.reverse)
 	if err != nil {
 		return err
 	}
 
+	if isRoot {
+		name := filepath.Base(path)
+		if name == "." {
+			name = path
+		}
+		printNode(name, info, opts, "", true, true, "", false)
+	}
+
 	for i, entry := range entries {
 		isLast := i == len(entries)-1
+		entryPath := filepath.Join(path, entry.Name())
 
-		var newPrefix string
-		if isRoot {
-			newPrefix = ""
+		entryIsSymlink := entry.Mode()&os.ModeSymlink != 0
+		linkTarget := ""
+
+		if entryIsSymlink && opts.derefLinks {
+			targetPath, err := filepath.EvalSymlinks(entryPath)
+			if err == nil {
+				targetInfo, err := os.Stat(targetPath)
+				if err == nil {
+					entry = targetInfo
+					entryPath = targetPath
+					entryIsSymlink = false
+				}
+			}
+		} else if entryIsSymlink && !opts.noSymlink {
+			target, err := os.Readlink(entryPath)
+			if err == nil {
+				linkTarget = target
+			}
+		}
+
+		linePrefix := prefix
+		if isLast {
+			linePrefix += branch
 		} else {
+			linePrefix += tee
+		}
+
+		printNode(entry.Name(), entry, opts, linePrefix, false, true, linkTarget, entryIsSymlink)
+
+		if entry.IsDir() {
+			var newPrefix string
 			if isLast {
 				newPrefix = prefix + space
 			} else {
 				newPrefix = prefix + pipe
 			}
-		}
-
-		linePrefix := prefix
-		if !isRoot {
-			if isLast {
-				linePrefix += branch
-			} else {
-				linePrefix += tee
-			}
-		}
-
-		entryPath := filepath.Join(path, entry.Name())
-
-		if entry.Mode()&os.ModeSymlink != 0 && opts.derefLinks {
-			targetPath, err := filepath.EvalSymlinks(entryPath)
-			if err == nil {
-				stat, err := os.Stat(targetPath)
-				if err == nil {
-					entry = stat
-					entryPath = targetPath
-				}
-			}
-		}
-
-		if entry.IsDir() {
-			err = printTree(entryPath, opts, newPrefix, false)
+			err := printTree(entryPath, opts, newPrefix, false)
 			if err != nil {
 				logger.Warnf("Error reading directory %s: %v", entryPath, err)
 			}
-		} else {
-			var entryLinkTarget string
-			entryIsSymlink := entry.Mode()&os.ModeSymlink != 0
-			if entryIsSymlink && !opts.noSymlink && !opts.derefLinks {
-				target, err := os.Readlink(entryPath)
-				if err == nil {
-					entryLinkTarget = target
-				}
-			}
-			printNode(entry.Name(), entry, opts, linePrefix, false, false, entryLinkTarget, entryIsSymlink)
 		}
 	}
 
